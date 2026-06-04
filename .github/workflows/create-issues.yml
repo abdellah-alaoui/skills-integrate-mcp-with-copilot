@@ -1,0 +1,44 @@
+name: Create issues from file
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  create_issues:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create issues from markdown
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const path = '.github/ISSUES_TO_CREATE.md';
+            const res = await github.rest.repos.getContent({ owner, repo, path });
+            const md = Buffer.from(res.data.content, 'base64').toString('utf8');
+            const sections = md.split('\n---\n').map(s => s.trim()).filter(Boolean);
+            for (const sec of sections) {
+              // First heading line '## Title'
+              const titleMatch = sec.match(/^##\s+(.+)$/m);
+              if (!titleMatch) continue;
+              const title = titleMatch[1].trim();
+              // Body: everything after the title line
+              const body = sec.split(/\n/).slice(1).join('\n').trim();
+
+              // Check if an issue with same title already exists
+              const search = await github.rest.issues.listForRepo({ owner, repo, state: 'all', per_page: 100 });
+              const exists = search.data.some(i => i.title === title);
+              if (exists) {
+                core.info(`Issue already exists: ${title}`);
+                continue;
+              }
+
+              await github.rest.issues.create({ owner, repo, title, body });
+              core.info(`Created issue: ${title}`);
+            }
